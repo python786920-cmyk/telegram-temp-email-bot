@@ -5,7 +5,7 @@ const WebSocket = require('ws');
 const express = require('express');
 
 // Bot Configuration
-const BOT_TOKEN = '8006290667:AAFrfrSsgNWDjuwqToSoGB9x-9nGyUIltyE';
+const BOT_TOKEN = '8368251170:AAEelPG6m875saeq_mqq81c04cwUv05twyE';
 const CHANNEL_URL = 'https://t.me/earning_tips009';
 const CHANNEL_USERNAME = '@earning_tips009';
 
