@@ -1,7 +1,7 @@
 {
   "name": "telegram-temp-email-bot",
   "version": "1.0.0",
-  "description": "Professional Telegram Temp Email Bot with Real-time Inbox",
+  "description": "Professional Telegram Temp Email Bot with Real-time Inbox Updates",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -11,23 +11,19 @@
     "telegram",
     "bot",
     "temp-email",
-    "nodejs",
-    "mysql",
-    "websocket"
+    "mail.tm",
+    "real-time"
   ],
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
     "telegraf": "^4.15.6",
-    "axios": "^1.6.0",
+    "axios": "^1.6.2",
     "mysql2": "^3.6.5",
-    "dotenv": "^16.3.1",
     "ws": "^8.14.2",
+    "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "node-cron": "^3.0.3"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
   },
   "engines": {
     "node": ">=18.0.0"
