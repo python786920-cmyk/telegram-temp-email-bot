@@ -15,7 +15,7 @@ PORT=3000
 NODE_ENV=production
 
 # Render.com URL (Add your actual Render URL after deployment)
-RENDER_URL=https://your-app-name.onrender.com
+RENDER_URL=https://telegram-temp-email-bot-4.onrender.com
 
 # Logging Configuration
 LOG_LEVEL=info
