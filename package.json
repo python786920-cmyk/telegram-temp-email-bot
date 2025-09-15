@@ -1,33 +1,33 @@
 {
-  "name": "temp-email-telegram-bot",
-  "version": "2.0.0",
-  "description": "Professional Temporary Email Telegram Bot with Real-time WebSocket Support",
-  "main": "index.js",
+  "name": "telegram-temp-email-bot",
+  "version": "1.0.0",
+  "description": "Professional Telegram Temp Email Bot with Real-time Inbox",
+  "main": "server.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
-    "test": "echo \"No tests specified\" && exit 0"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "keywords": [
     "telegram",
     "bot",
-    "email",
-    "temporary",
-    "websocket",
-    "realtime"
+    "temp-email",
+    "nodejs",
+    "mysql",
+    "websocket"
   ],
-  "author": "Professional Bot Developer",
+  "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "node-telegram-bot-api": "^0.64.0",
+    "telegraf": "^4.15.6",
+    "axios": "^1.6.0",
     "mysql2": "^3.6.5",
+    "dotenv": "^16.3.1",
     "ws": "^8.14.2",
-    "axios": "^1.6.2",
     "express": "^4.18.2",
-    "dotenv": "^16.3.1"
+    "node-cron": "^3.0.3"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.1"
   },
   "engines": {
     "node": ">=18.0.0"
