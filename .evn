@@ -1,20 +1,24 @@
 # Telegram Bot Configuration
 BOT_TOKEN=8368251170:AAEelPG6m875saeq_mqq81c04cwUv05twyE
 
-# MySQL Database Configuration
+# Database Configuration
 DB_HOST=cashearnersofficial.xyz
 DB_USER=cztldhwx_tampemail
 DB_PASSWORD=Aptap786920
 DB_NAME=cztldhwx_tampemail
 
-# Mail.tm API Configuration
-MAILTM_API_URL=https://api.mail.tm
-MAILTM_WS_URL=wss://mercure.mail.tm/.well-known/mercure
-
 # Channel Configuration
-TELEGRAM_CHANNEL=@earning_tips009
-CHANNEL_ID=-1002631370324
+CHANNEL_URL=https://t.me/earning_tips009
 
 # Server Configuration
 PORT=3000
 NODE_ENV=production
+
+# Render.com URL (Add your actual Render URL after deployment)
+RENDER_URL=https://your-app-name.onrender.com
+
+# Logging Configuration
+LOG_LEVEL=info
+
+# Keep Alive Configuration (for UptimeRobot)
+KEEP_ALIVE_INTERVAL=300000
