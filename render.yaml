@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: temp-email-bot
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        value: 8368251170:AAEelPG6m875saeq_mqq81c04cwUv05twyE
+      - key: NODE_ENV
+        value: production
+      - key: DB_HOST
+        value: cashearnersofficial.xyz
+      - key: DB_USER
+        value: cztldhwx_tampemail
+      - key: DB_PASSWORD
+        value: Aptap786920
+      - key: DB_NAME
+        value: cztldhwx_tampemail
+      - key: CHANNEL_USERNAME
+        value: "@earning_tips009"
+      - key: CHANNEL_URL
+        value: "https://t.me/earning_tips009"
+    
+    # Auto-deploy from Git
+    autoDeploy: true
+    
+    # Resource limits for free tier
+    disk:
+      name: temp-email-bot-disk
+      size: 500MB
+      mount: /tmp
