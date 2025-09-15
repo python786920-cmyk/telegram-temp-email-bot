@@ -40,6 +40,16 @@ async function initDatabase() {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         `);
 
+        // Add updated_at column if it doesn't exist
+        try {
+            await db.execute(`ALTER TABLE emails ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`);
+        } catch (error) {
+            // Column might already exist, ignore error
+            if (!error.message.includes('Duplicate column name')) {
+                console.log('Note: updated_at column handling:', error.message);
+            }
+        }
+
         await db.execute(`
             CREATE TABLE IF NOT EXISTS email_messages (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -570,7 +580,8 @@ bot.on('text', async (ctx) => {
 // Restore WebSocket connections on startup
 async function restoreConnections() {
     try {
-        const [emails] = await db.execute('SELECT * FROM emails WHERE updated_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)');
+        // Use created_at instead of updated_at for compatibility
+        const [emails] = await db.execute('SELECT * FROM emails WHERE created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)');
         
         for (const emailData of emails) {
             try {
@@ -621,13 +632,32 @@ async function start() {
     try {
         await initDatabase();
         
-        // Restore WebSocket connections
-        setTimeout(restoreConnections, 5000);
+        // Add delay to prevent bot conflicts
+        console.log('⏳ Waiting 10 seconds before starting bot to prevent conflicts...');
+        await new Promise(resolve => setTimeout(resolve, 10000));
         
-        // Start bot
-        await bot.launch();
-        console.log('🚀 Bot started successfully!');
-        console.log(`📡 Listening on port ${process.env.PORT || 3000}`);
+        // Restore WebSocket connections after delay
+        setTimeout(restoreConnections, 15000);
+        
+        // Start bot with webhook mode for production
+        if (process.env.NODE_ENV === 'production') {
+            // Use webhook mode to prevent conflicts
+            const PORT = process.env.PORT || 3000;
+            const webhookPath = `/webhook/${process.env.BOT_TOKEN}`;
+            
+            // Set webhook
+            await bot.telegram.setWebhook(`https://${process.env.RENDER_EXTERNAL_HOSTNAME}${webhookPath}`);
+            
+            // Start webhook
+            bot.startWebhook(webhookPath, null, PORT);
+            console.log(`🚀 Bot started in webhook mode on port ${PORT}`);
+        } else {
+            // Use polling for development
+            await bot.launch();
+            console.log('🚀 Bot started in polling mode');
+        }
+        
+        console.log(`📡 Bot is ready and listening!`);
         
         // Graceful shutdown
         process.once('SIGINT', () => bot.stop('SIGINT'));
@@ -635,7 +665,22 @@ async function start() {
         
     } catch (error) {
         console.error('❌ Failed to start bot:', error);
-        process.exit(1);
+        
+        // If webhook fails, try polling mode
+        if (process.env.NODE_ENV === 'production' && error.message.includes('409')) {
+            console.log('🔄 Webhook failed, trying polling mode...');
+            try {
+                await bot.telegram.deleteWebhook();
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                await bot.launch();
+                console.log('🚀 Bot started in polling mode as fallback');
+            } catch (fallbackError) {
+                console.error('❌ Fallback also failed:', fallbackError);
+                process.exit(1);
+            }
+        } else {
+            process.exit(1);
+        }
     }
 }
 
