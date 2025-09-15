@@ -5,7 +5,7 @@ const axios = require('axios');
 const WebSocket = require('ws');
 const express = require('express');
 
-// Initialize Express server for health check
+// Initialize Express server
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -17,18 +17,20 @@ app.get('/', (req, res) => {
     });
 });
 
-app.get('/health', (req, res) => {
-    res.json({ status: 'OK', bot: 'Active' });
+// Webhook endpoint
+app.use(express.json());
+app.post('/webhook', (req, res) => {
+    bot.handleUpdate(req.body, res);
 });
 
 app.listen(PORT, () => {
-    console.log(`🚀 Health check server running on port ${PORT}`);
+    console.log(`🚀 Server running on port ${PORT}`);
 });
 
 // Initialize Telegram Bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// MySQL Connection Pool (Clean Configuration)
+// MySQL Connection Pool
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
@@ -44,54 +46,43 @@ const wsConnections = new Map();
 
 // Database initialization
 async function initDatabase() {
-    let retries = 3;
-    
-    while (retries > 0) {
-        try {
-            const connection = await pool.getConnection();
-            
-            // Test connection
-            await connection.execute('SELECT 1');
-            
-            // Create emails table
-            await connection.execute(`
-                CREATE TABLE IF NOT EXISTS emails (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    email VARCHAR(255) NOT NULL,
-                    password VARCHAR(255) NOT NULL,
-                    token TEXT NOT NULL,
-                    telegram_user_id BIGINT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX idx_user_id (telegram_user_id),
-                    INDEX idx_email (email)
-                )
-            `);
+    try {
+        const connection = await pool.getConnection();
+        
+        await connection.execute(`
+            CREATE TABLE IF NOT EXISTS emails (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                email VARCHAR(255) NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                token TEXT NOT NULL,
+                telegram_user_id BIGINT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_user_id (telegram_user_id),
+                INDEX idx_email (email)
+            )
+        `);
 
-            // Create email_messages table
-            await connection.execute(`
-                CREATE TABLE IF NOT EXISTS email_messages (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    email VARCHAR(255) NOT NULL,
-                    message_id VARCHAR(255) NOT NULL,
-                    sender VARCHAR(255) NOT NULL,
-                    subject TEXT,
-                    text TEXT,
-                    received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_email (email),
-                    INDEX idx_message_id (message_id)
-                )
-            `);
+        await connection.execute(`
+            CREATE TABLE IF NOT EXISTS email_messages (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                email VARCHAR(255) NOT NULL,
+                message_id VARCHAR(255) NOT NULL,
+                sender VARCHAR(255) NOT NULL,
+                subject TEXT,
+                text TEXT,
+                received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_email (email),
+                INDEX idx_message_id (message_id)
+            )
+        `);
 
-            connection.release();
-            console.log('✅ Database initialized successfully');
-            return;
-        } catch (error) {
-            retries--;
-            console.error(`❌ Database error (${3-retries}/3):`, error.message);
-            if (retries === 0) throw error;
-            await new Promise(resolve => setTimeout(resolve, 2000));
-        }
+        connection.release();
+        console.log('✅ Database initialized');
+        return true;
+    } catch (error) {
+        console.error('❌ Database error:', error.message);
+        return false;
     }
 }
 
@@ -99,60 +90,46 @@ async function initDatabase() {
 class MailTmAPI {
     static async getDomains() {
         try {
-            const response = await axios.get('https://api.mail.tm/domains', {
-                timeout: 10000
-            });
+            const response = await axios.get('https://api.mail.tm/domains', { timeout: 10000 });
             return response.data['hydra:member'][0].domain;
         } catch (error) {
-            console.log('Using fallback domain');
             return 'guerrillamail.info';
         }
     }
 
     static async createAccount() {
-        try {
-            const domain = await this.getDomains();
-            const randomString = Math.random().toString(36).substring(2, 10);
-            const email = `${randomString}@${domain}`;
-            const password = Math.random().toString(36).substring(2, 12);
+        const domain = await this.getDomains();
+        const randomString = Math.random().toString(36).substring(2, 10);
+        const email = `${randomString}@${domain}`;
+        const password = Math.random().toString(36).substring(2, 12);
 
-            const response = await axios.post('https://api.mail.tm/accounts', {
-                address: email,
-                password: password
-            }, { timeout: 15000 });
+        const response = await axios.post('https://api.mail.tm/accounts', {
+            address: email,
+            password: password
+        }, { timeout: 15000 });
 
-            return {
-                email: response.data.address,
-                password: password,
-                id: response.data.id
-            };
-        } catch (error) {
-            throw new Error('Failed to create email account');
-        }
+        return {
+            email: response.data.address,
+            password: password,
+            id: response.data.id
+        };
     }
 
     static async getToken(email, password) {
-        try {
-            const response = await axios.post('https://api.mail.tm/token', {
-                address: email,
-                password: password
-            }, { timeout: 10000 });
+        const response = await axios.post('https://api.mail.tm/token', {
+            address: email,
+            password: password
+        }, { timeout: 10000 });
 
-            return response.data.token;
-        } catch (error) {
-            throw new Error('Failed to get authentication token');
-        }
+        return response.data.token;
     }
 
     static async getMessages(token) {
         try {
             const response = await axios.get('https://api.mail.tm/messages', {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                },
+                headers: { 'Authorization': `Bearer ${token}` },
                 timeout: 10000
             });
-
             return response.data['hydra:member'] || [];
         } catch (error) {
             return [];
@@ -160,10 +137,9 @@ class MailTmAPI {
     }
 }
 
-// WebSocket connection for real-time messages
+// WebSocket setup
 function setupWebSocket(email, token, userId) {
     try {
-        // Close existing connection
         if (wsConnections.has(email)) {
             wsConnections.get(email).close();
         }
@@ -182,17 +158,17 @@ function setupWebSocket(email, token, userId) {
                 if (message.type === 'message' && message.data) {
                     const emailData = message.data;
                     
-                    // Store message in database
+                    // Store in database
                     try {
                         await pool.execute(
                             'INSERT INTO email_messages (email, message_id, sender, subject, text) VALUES (?, ?, ?, ?, ?)',
                             [email, emailData.id, emailData.from.address, emailData.subject || '', emailData.intro || emailData.text || '']
                         );
                     } catch (dbError) {
-                        console.error('Database insert error:', dbError.message);
+                        console.error('DB insert error:', dbError.message);
                     }
 
-                    // Send notification to user
+                    // Send notification
                     const messageText = `📩 New Mail Received! 🪧\n\n📇 From: ${emailData.from.address}\n🗒️ Subject: ${emailData.subject || 'No Subject'}\n💬 Message: ${(emailData.intro || emailData.text || 'No content').substring(0, 200)}${(emailData.intro || emailData.text || '').length > 200 ? '...' : ''}\n\n📬 Email: ${email}`;
                     
                     try {
@@ -207,7 +183,7 @@ function setupWebSocket(email, token, userId) {
         });
 
         ws.on('error', (error) => {
-            console.error(`WebSocket error for ${email}:`, error.message);
+            console.error(`WebSocket error: ${error.message}`);
         });
 
         ws.on('close', () => {
@@ -220,7 +196,7 @@ function setupWebSocket(email, token, userId) {
     }
 }
 
-// Database helper functions
+// Database helpers
 async function saveEmail(userId, email, password, token) {
     try {
         await pool.execute(
@@ -229,7 +205,6 @@ async function saveEmail(userId, email, password, token) {
         );
         return true;
     } catch (error) {
-        console.error('Save email error:', error.message);
         return false;
     }
 }
@@ -248,10 +223,7 @@ async function getUserEmails(userId) {
 
 async function getEmailByAddress(email) {
     try {
-        const [rows] = await pool.execute(
-            'SELECT * FROM emails WHERE email = ?',
-            [email]
-        );
+        const [rows] = await pool.execute('SELECT * FROM emails WHERE email = ?', [email]);
         return rows[0] || null;
     } catch (error) {
         return null;
@@ -448,66 +420,94 @@ bot.on('text', async (ctx) => {
 // Error handling
 bot.catch((err, ctx) => {
     console.error('Bot error:', err.message);
-    if (ctx && ctx.reply) {
-        ctx.reply('❌ An error occurred. Please try again!').catch(() => {});
+});
+
+// Force stop any existing bot instances
+async function forceStopBot() {
+    try {
+        console.log('🛑 Force stopping any existing bot instances...');
+        
+        // Try to delete webhook multiple times
+        for (let i = 0; i < 3; i++) {
+            try {
+                await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+                console.log(`✅ Webhook deleted (attempt ${i + 1})`);
+                break;
+            } catch (error) {
+                console.log(`⚠️ Webhook delete attempt ${i + 1} failed:`, error.message);
+                if (i < 2) await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+        
+        // Wait before starting
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        console.log('✅ All existing instances should be stopped');
+        
+    } catch (error) {
+        console.error('Force stop error:', error.message);
     }
-});
+}
 
-// Graceful shutdown
-process.once('SIGINT', async () => {
-    console.log('🛑 Shutting down gracefully...');
-    wsConnections.forEach((ws) => {
-        if (ws.readyState === WebSocket.OPEN) ws.close();
-    });
-    await bot.stop('SIGINT');
-    await pool.end();
-    process.exit(0);
-});
-
-process.once('SIGTERM', async () => {
-    console.log('🛑 Shutting down gracefully...');
-    wsConnections.forEach((ws) => {
-        if (ws.readyState === WebSocket.OPEN) ws.close();
-    });
-    await bot.stop('SIGTERM');
-    await pool.end();
-    process.exit(0);
-});
-
-// Start bot function
+// Start bot with webhook (Production method)
 async function startBot() {
     try {
         await initDatabase();
         console.log('🤖 Starting Telegram bot...');
         
-        // Delete webhook and start with polling
-        await bot.telegram.deleteWebhook();
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Force stop existing instances
+        await forceStopBot();
         
-        await bot.launch();
-        console.log('✅ Bot started successfully!');
+        // Set webhook (Production method - no conflicts)
+        const webhookUrl = `https://telegram-temp-email-bot-2.onrender.com/webhook`;
         
-        // Heartbeat
+        await bot.telegram.setWebhook(webhookUrl, {
+            drop_pending_updates: true,
+            allowed_updates: ['message', 'callback_query']
+        });
+        
+        console.log(`✅ Webhook set to: ${webhookUrl}`);
+        console.log('✅ Bot started successfully with webhook!');
+        
+        // Health check ping every 5 minutes
         setInterval(() => {
             console.log('💓 Bot heartbeat:', new Date().toISOString());
         }, 300000);
         
     } catch (error) {
-        console.error('❌ Start error:', error.message);
+        console.error('❌ Webhook setup failed:', error.message);
         
-        // Retry once
+        // Fallback to polling after 10 seconds
         setTimeout(async () => {
             try {
-                await bot.telegram.deleteWebhook();
+                console.log('🔄 Trying polling as fallback...');
+                await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+                await new Promise(resolve => setTimeout(resolve, 3000));
                 await bot.launch();
-                console.log('✅ Bot started on retry!');
-            } catch (retryError) {
-                console.error('❌ Retry failed:', retryError.message);
-                process.exit(1);
+                console.log('✅ Bot started with polling!');
+            } catch (pollingError) {
+                console.error('❌ Polling also failed:', pollingError.message);
             }
-        }, 5000);
+        }, 10000);
     }
 }
 
-// Initialize
+// Graceful shutdown
+const gracefulShutdown = async (signal) => {
+    console.log(`🛑 Received ${signal}, shutting down gracefully...`);
+    try {
+        wsConnections.forEach((ws) => {
+            if (ws.readyState === WebSocket.OPEN) ws.close();
+        });
+        await bot.stop(signal);
+        await pool.end();
+    } catch (error) {
+        console.error('Shutdown error:', error.message);
+    }
+    process.exit(0);
+};
+
+process.once('SIGINT', () => gracefulShutdown('SIGINT'));
+process.once('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// Initialize everything
 startBot().catch(console.error);
