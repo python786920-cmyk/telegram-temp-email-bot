@@ -9,7 +9,7 @@ const cron = require('node-cron');
 // Initialize Express for health checks
 const app = express();
 app.get('/', (req, res) => res.send('🤖 Telegram Temp Email Bot is Running!'));
-app.listen(process.env.PORT || 3000);
+app.listen(process.env.PORT || 3001);
 
 // Initialize Telegram Bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
