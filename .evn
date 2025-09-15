@@ -7,17 +7,14 @@ DB_USER=cztldhwx_tampemail
 DB_PASSWORD=Aptap786920
 DB_NAME=cztldhwx_tampemail
 
-# Channel Configuration
-CHANNEL_URL=https://t.me/earning_tips009
-CHANNEL_USERNAME=@earning_tips009
-
 # Mail.tm API Configuration
-MAIL_TM_API=https://api.mail.tm
-MAIL_TM_WS=wss://api.mail.tm/messages
+MAILTM_API_URL=https://api.mail.tm
+MAILTM_WS_URL=wss://mercure.mail.tm/.well-known/mercure
+
+# Channel Configuration
+TELEGRAM_CHANNEL=@earning_tips009
+CHANNEL_ID=-1002631370324
 
 # Server Configuration
 PORT=3000
 NODE_ENV=production
-
-# Admin Configuration (Optional)
-ADMIN_ID=5175304803
