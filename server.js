@@ -466,8 +466,17 @@ async function startBot() {
     try {
         await initializeDatabase();
         
-        // Launch bot
-        await bot.launch();
+        // Set webhook for production
+        if (process.env.NODE_ENV === 'production') {
+            const webhookUrl = `${process.env.RENDER_URL || 'https://telegram-temp-email-bot-4.onrender.com'}/webhook`;
+            await bot.telegram.setWebhook(webhookUrl);
+            logger.info(`Webhook set to: ${webhookUrl}`);
+        } else {
+            // Use polling for development
+            await bot.launch();
+            logger.info('Bot started in polling mode');
+        }
+        
         logger.info('Bot started successfully');
         
         // Graceful stop
@@ -476,16 +485,33 @@ async function startBot() {
         
     } catch (error) {
         logger.error('Failed to start bot:', error);
-        process.exit(1);
+        // Don't exit, keep HTTP server running
     }
 }
 
-// Simple HTTP server for health checks
+// Simple HTTP server for health checks and webhook
 const http = require('http');
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
     if (req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'OK', timestamp: new Date().toISOString() }));
+    } else if (req.url === '/webhook' && req.method === 'POST') {
+        let body = '';
+        req.on('data', (chunk) => {
+            body += chunk.toString();
+        });
+        req.on('end', async () => {
+            try {
+                const update = JSON.parse(body);
+                await bot.handleUpdate(update);
+                res.writeHead(200);
+                res.end('OK');
+            } catch (error) {
+                logger.error('Webhook error:', error);
+                res.writeHead(500);
+                res.end('Error');
+            }
+        });
     } else {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('Not Found');
