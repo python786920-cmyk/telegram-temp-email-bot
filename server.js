@@ -11,49 +11,43 @@ const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
     res.json({ 
-        status: 'Bot is running!', 
+        status: 'Temp Email Bot Running Successfully!', 
         timestamp: new Date().toISOString(),
-        uptime: process.uptime() 
+        uptime: `${Math.floor(process.uptime())} seconds`
     });
+});
+
+app.get('/health', (req, res) => {
+    res.json({ status: 'OK', bot: 'Active' });
 });
 
 app.listen(PORT, () => {
     console.log(`🚀 Health check server running on port ${PORT}`);
 });
 
-// Initialize Telegram Bot with better error handling
+// Initialize Telegram Bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// Set bot username to avoid conflicts
-bot.telegram.getMe().then((botInfo) => {
-    console.log(`🤖 Bot @${botInfo.username} initialized`);
-});
-
-// MySQL Connection Pool (Fixed configuration)
-const dbConfig = {
+// MySQL Connection Pool (Clean Configuration)
+const pool = mysql.createPool({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
     waitForConnections: true,
     connectionLimit: 5,
-    queueLimit: 0,
-    reconnect: true,
-    charset: 'utf8mb4'
-};
-
-let pool;
+    queueLimit: 0
+});
 
 // WebSocket connections storage
 const wsConnections = new Map();
 
-// Database initialization with retry logic
+// Database initialization
 async function initDatabase() {
     let retries = 3;
     
     while (retries > 0) {
         try {
-            pool = mysql.createPool(dbConfig);
             const connection = await pool.getConnection();
             
             // Test connection
@@ -94,10 +88,8 @@ async function initDatabase() {
             return;
         } catch (error) {
             retries--;
-            console.error(`❌ Database initialization error (${3-retries}/3):`, error.message);
-            if (retries === 0) {
-                throw error;
-            }
+            console.error(`❌ Database error (${3-retries}/3):`, error.message);
+            if (retries === 0) throw error;
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
     }
@@ -107,12 +99,12 @@ async function initDatabase() {
 class MailTmAPI {
     static async getDomains() {
         try {
-            const response = await axios.get(`${process.env.MAIL_TM_API}/domains`, {
+            const response = await axios.get('https://api.mail.tm/domains', {
                 timeout: 10000
             });
             return response.data['hydra:member'][0].domain;
         } catch (error) {
-            console.error('Error fetching domains:', error.message);
+            console.log('Using fallback domain');
             return 'guerrillamail.info';
         }
     }
@@ -124,7 +116,7 @@ class MailTmAPI {
             const email = `${randomString}@${domain}`;
             const password = Math.random().toString(36).substring(2, 12);
 
-            const response = await axios.post(`${process.env.MAIL_TM_API}/accounts`, {
+            const response = await axios.post('https://api.mail.tm/accounts', {
                 address: email,
                 password: password
             }, { timeout: 15000 });
@@ -135,28 +127,26 @@ class MailTmAPI {
                 id: response.data.id
             };
         } catch (error) {
-            console.error('Error creating account:', error.message);
             throw new Error('Failed to create email account');
         }
     }
 
     static async getToken(email, password) {
         try {
-            const response = await axios.post(`${process.env.MAIL_TM_API}/token`, {
+            const response = await axios.post('https://api.mail.tm/token', {
                 address: email,
                 password: password
             }, { timeout: 10000 });
 
             return response.data.token;
         } catch (error) {
-            console.error('Error getting token:', error.message);
             throw new Error('Failed to get authentication token');
         }
     }
 
     static async getMessages(token) {
         try {
-            const response = await axios.get(`${process.env.MAIL_TM_API}/messages`, {
+            const response = await axios.get('https://api.mail.tm/messages', {
                 headers: {
                     'Authorization': `Bearer ${token}`
                 },
@@ -165,23 +155,20 @@ class MailTmAPI {
 
             return response.data['hydra:member'] || [];
         } catch (error) {
-            console.error('Error getting messages:', error.message);
             return [];
         }
     }
 }
 
-// WebSocket connection with better error handling
+// WebSocket connection for real-time messages
 function setupWebSocket(email, token, userId) {
     try {
-        // Close existing connection if any
+        // Close existing connection
         if (wsConnections.has(email)) {
             wsConnections.get(email).close();
         }
 
-        const ws = new WebSocket(`${process.env.MAIL_TM_WS}?token=${token}`, {
-            handshakeTimeout: 10000
-        });
+        const ws = new WebSocket(`wss://api.mail.tm/messages?token=${token}`);
         
         ws.on('open', () => {
             console.log(`🔌 WebSocket connected for ${email}`);
@@ -196,20 +183,26 @@ function setupWebSocket(email, token, userId) {
                     const emailData = message.data;
                     
                     // Store message in database
-                    if (pool) {
+                    try {
                         await pool.execute(
                             'INSERT INTO email_messages (email, message_id, sender, subject, text) VALUES (?, ?, ?, ?, ?)',
-                            [email, emailData.id, emailData.from.address, emailData.subject, emailData.intro || emailData.text]
+                            [email, emailData.id, emailData.from.address, emailData.subject || '', emailData.intro || emailData.text || '']
                         );
+                    } catch (dbError) {
+                        console.error('Database insert error:', dbError.message);
                     }
 
                     // Send notification to user
                     const messageText = `📩 New Mail Received! 🪧\n\n📇 From: ${emailData.from.address}\n🗒️ Subject: ${emailData.subject || 'No Subject'}\n💬 Message: ${(emailData.intro || emailData.text || 'No content').substring(0, 200)}${(emailData.intro || emailData.text || '').length > 200 ? '...' : ''}\n\n📬 Email: ${email}`;
                     
-                    await bot.telegram.sendMessage(userId, messageText);
+                    try {
+                        await bot.telegram.sendMessage(userId, messageText);
+                    } catch (telegramError) {
+                        console.error('Telegram send error:', telegramError.message);
+                    }
                 }
             } catch (error) {
-                console.error('WebSocket message processing error:', error.message);
+                console.error('WebSocket message error:', error.message);
             }
         });
 
@@ -217,79 +210,65 @@ function setupWebSocket(email, token, userId) {
             console.error(`WebSocket error for ${email}:`, error.message);
         });
 
-        ws.on('close', (code, reason) => {
-            console.log(`🔌 WebSocket disconnected for ${email}: ${code} - ${reason}`);
+        ws.on('close', () => {
+            console.log(`🔌 WebSocket disconnected for ${email}`);
             wsConnections.delete(email);
         });
-
-        // Auto-reconnect after 30 seconds if connection lost
-        setTimeout(() => {
-            if (ws.readyState === WebSocket.CLOSED) {
-                console.log(`🔄 Reconnecting WebSocket for ${email}`);
-                setupWebSocket(email, token, userId);
-            }
-        }, 30000);
 
     } catch (error) {
         console.error('WebSocket setup error:', error.message);
     }
 }
 
-// Database helper functions with error handling
+// Database helper functions
 async function saveEmail(userId, email, password, token) {
     try {
-        if (!pool) return false;
         await pool.execute(
             'INSERT INTO emails (telegram_user_id, email, password, token) VALUES (?, ?, ?, ?)',
             [userId, email, password, token]
         );
         return true;
     } catch (error) {
-        console.error('Error saving email:', error.message);
+        console.error('Save email error:', error.message);
         return false;
     }
 }
 
 async function getUserEmails(userId) {
     try {
-        if (!pool) return [];
         const [rows] = await pool.execute(
             'SELECT * FROM emails WHERE telegram_user_id = ? ORDER BY created_at DESC LIMIT 10',
             [userId]
         );
         return rows;
     } catch (error) {
-        console.error('Error getting user emails:', error.message);
         return [];
     }
 }
 
 async function getEmailByAddress(email) {
     try {
-        if (!pool) return null;
         const [rows] = await pool.execute(
             'SELECT * FROM emails WHERE email = ?',
             [email]
         );
         return rows[0] || null;
     } catch (error) {
-        console.error('Error getting email by address:', error.message);
         return null;
     }
 }
 
-// Check if user joined channel
+// Check channel membership
 async function checkChannelMembership(userId) {
     try {
-        const chatMember = await bot.telegram.getChatMember(process.env.CHANNEL_USERNAME, userId);
+        const chatMember = await bot.telegram.getChatMember('@earning_tips009', userId);
         return ['member', 'administrator', 'creator'].includes(chatMember.status);
     } catch (error) {
-        console.error('Error checking membership:', error.message);
         return false;
     }
 }
 
-// Bot commands with better error handling
+// Bot commands
 bot.start(async (ctx) => {
     try {
         const welcomeMessage = `👑 Hey There! Welcome To Temp Email Bot! 
@@ -304,14 +283,13 @@ bot.start(async (ctx) => {
 • Secure & fast`;
 
         const keyboard = Markup.inlineKeyboard([
-            [Markup.button.url('📢 Join Channel', process.env.CHANNEL_URL)],
+            [Markup.button.url('📢 Join Channel', 'https://t.me/earning_tips009')],
             [Markup.button.callback('✅ Verify', 'verify')]
         ]);
 
         await ctx.reply(welcomeMessage, keyboard);
     } catch (error) {
-        console.error('Start command error:', error.message);
-        await ctx.reply('❌ Error occurred. Please try again!');
+        console.error('Start error:', error.message);
     }
 });
 
@@ -334,15 +312,13 @@ bot.action('verify', async (ctx) => {
             await ctx.reply('❌ Please join the channel first and then click verify!');
         }
     } catch (error) {
-        console.error('Verify action error:', error.message);
         await ctx.answerCbQuery('❌ Error occurred!');
     }
 });
 
 bot.hears('🌀 Generate New', async (ctx) => {
-    const userId = ctx.from.id;
-    
     try {
+        const userId = ctx.from.id;
         const loadingMsg = await ctx.reply('⏳ Generating new temp email...');
         
         const account = await MailTmAPI.createAccount();
@@ -351,19 +327,18 @@ bot.hears('🌀 Generate New', async (ctx) => {
         const saved = await saveEmail(userId, account.email, account.password, token);
         
         if (saved) {
-            // Setup WebSocket for real-time notifications
             setupWebSocket(account.email, token, userId);
             
             const successMessage = `♻️ New Email Generated Successfully ✅\n\n📬 Email ID: \`${account.email}\` 👈\n🔐 Password: \`${account.password}\`\n\n🔔 Real-time notifications are now active!`;
             
             await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, successMessage, { parse_mode: 'Markdown' });
         } else {
-            await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, '❌ Error saving email to database!');
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, '❌ Error saving email!');
         }
         
     } catch (error) {
         console.error('Generate email error:', error.message);
-        await ctx.reply('❌ Error generating email. Please try again later!');
+        await ctx.reply('❌ Error generating email. Please try again!');
     }
 });
 
@@ -384,7 +359,6 @@ bot.hears('📥 Inbox', async (ctx) => {
         const keyboard = Markup.inlineKeyboard(buttons);
         await ctx.reply('📥 Select email to check inbox:', keyboard);
     } catch (error) {
-        console.error('Inbox command error:', error.message);
         await ctx.reply('❌ Error loading emails!');
     }
 });
@@ -392,11 +366,6 @@ bot.hears('📥 Inbox', async (ctx) => {
 bot.action(/inbox_(\d+)/, async (ctx) => {
     try {
         const emailId = ctx.match[1];
-        
-        if (!pool) {
-            await ctx.answerCbQuery('❌ Database not available!');
-            return;
-        }
         
         const [emailRows] = await pool.execute('SELECT * FROM emails WHERE id = ?', [emailId]);
         const email = emailRows[0];
@@ -422,7 +391,7 @@ bot.action(/inbox_(\d+)/, async (ctx) => {
         }
         
     } catch (error) {
-        console.error('Inbox action error:', error.message);
+        console.error('Inbox error:', error.message);
         await ctx.answerCbQuery('❌ Error loading inbox!');
     }
 });
@@ -449,12 +418,11 @@ bot.hears('📧 My Emails', async (ctx) => {
         
         await ctx.reply(message);
     } catch (error) {
-        console.error('My emails error:', error.message);
         await ctx.reply('❌ Error loading your emails!');
     }
 });
 
-// Handle recovery email input
+// Handle recovery
 bot.on('text', async (ctx) => {
     try {
         if (ctx.session && ctx.session.waitingForEmail) {
@@ -464,23 +432,20 @@ bot.on('text', async (ctx) => {
             const emailData = await getEmailByAddress(emailAddress);
             
             if (emailData) {
-                // Setup WebSocket for recovered email
                 setupWebSocket(emailData.email, emailData.token, userId);
-                
                 await ctx.reply(`✅ Email recovered successfully!\n\n📬 Email: ${emailData.email}\n🔔 Real-time notifications reactivated!`);
             } else {
-                await ctx.reply('❌ Email not found! Make sure you entered the correct email address.');
+                await ctx.reply('❌ Email not found! Please check the email address.');
             }
             
             delete ctx.session.waitingForEmail;
         }
     } catch (error) {
-        console.error('Recovery text handler error:', error.message);
-        await ctx.reply('❌ Error during recovery!');
+        console.error('Recovery error:', error.message);
     }
 });
 
-// Global error handling
+// Error handling
 bot.catch((err, ctx) => {
     console.error('Bot error:', err.message);
     if (ctx && ctx.reply) {
@@ -488,80 +453,61 @@ bot.catch((err, ctx) => {
     }
 });
 
-// Graceful shutdown handlers
+// Graceful shutdown
 process.once('SIGINT', async () => {
-    console.log('🛑 Received SIGINT, shutting down gracefully...');
-    try {
-        wsConnections.forEach((ws) => {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.close();
-            }
-        });
-        await bot.stop('SIGINT');
-        if (pool) await pool.end();
-    } catch (error) {
-        console.error('Shutdown error:', error.message);
-    }
+    console.log('🛑 Shutting down gracefully...');
+    wsConnections.forEach((ws) => {
+        if (ws.readyState === WebSocket.OPEN) ws.close();
+    });
+    await bot.stop('SIGINT');
+    await pool.end();
     process.exit(0);
 });
 
 process.once('SIGTERM', async () => {
-    console.log('🛑 Received SIGTERM, shutting down gracefully...');
-    try {
-        wsConnections.forEach((ws) => {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.close();
-            }
-        });
-        await bot.stop('SIGTERM');
-        if (pool) await pool.end();
-    } catch (error) {
-        console.error('Shutdown error:', error.message);
-    }
+    console.log('🛑 Shutting down gracefully...');
+    wsConnections.forEach((ws) => {
+        if (ws.readyState === WebSocket.OPEN) ws.close();
+    });
+    await bot.stop('SIGTERM');
+    await pool.end();
     process.exit(0);
 });
 
-// Start the bot with retry logic
+// Start bot function
 async function startBot() {
-    let retries = 3;
-    
-    while (retries > 0) {
-        try {
-            await initDatabase();
-            console.log('🤖 Starting Telegram bot...');
-            
-            // Delete any existing webhook first
-            await bot.telegram.deleteWebhook();
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // Start with polling
-            await bot.launch();
-            console.log('✅ Bot started successfully with polling!');
-            
-            // Keep alive ping
-            setInterval(() => {
-                console.log('💓 Bot heartbeat:', new Date().toISOString());
-            }, 300000); // Every 5 minutes
-            
-            return;
-            
-        } catch (error) {
-            retries--;
-            console.error(`❌ Failed to start bot (${3-retries}/3):`, error.message);
-            
-            if (retries === 0) {
-                console.error('❌ All retry attempts failed. Exiting...');
+    try {
+        await initDatabase();
+        console.log('🤖 Starting Telegram bot...');
+        
+        // Delete webhook and start with polling
+        await bot.telegram.deleteWebhook();
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        await bot.launch();
+        console.log('✅ Bot started successfully!');
+        
+        // Heartbeat
+        setInterval(() => {
+            console.log('💓 Bot heartbeat:', new Date().toISOString());
+        }, 300000);
+        
+    } catch (error) {
+        console.error('❌ Start error:', error.message);
+        
+        // Retry once
+        setTimeout(async () => {
+            try {
+                await bot.telegram.deleteWebhook();
+                await bot.launch();
+                console.log('✅ Bot started on retry!');
+            } catch (retryError) {
+                console.error('❌ Retry failed:', retryError.message);
                 process.exit(1);
             }
-            
-            console.log('🔄 Retrying in 5 seconds...');
-            await new Promise(resolve => setTimeout(resolve, 5000));
-        }
+        }, 5000);
     }
 }
 
-// Initialize everything
-startBot().catch((error) => {
-    console.error('❌ Fatal error:', error.message);
-    process.exit(1);
-});
+// Initialize
+startBot().catch(console.error);
