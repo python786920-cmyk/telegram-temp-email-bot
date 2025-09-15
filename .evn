@@ -1,0 +1,20 @@
+# Telegram Bot Configuration
+BOT_TOKEN=8368251170:AAEelPG6m875saeq_mqq81c04cwUv05twyE
+
+# Server Configuration
+PORT=3000
+NODE_ENV=production
+
+# Database Configuration (Already configured in code)
+DB_HOST=cashearnersofficial.xyz
+DB_USER=cztldhwx_tampemail
+DB_PASSWORD=Aptap786920
+DB_NAME=cztldhwx_tampemail
+
+# Channel Configuration
+CHANNEL_USERNAME=@earning_tips009
+CHANNEL_URL=https://t.me/earning_tips009
+
+# Anti-Sleep Configuration (Optional)
+UPTIMEROBOT_ENABLED=true
+HEALTH_CHECK_INTERVAL=300000
